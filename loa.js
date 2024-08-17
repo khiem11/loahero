@@ -197,6 +197,7 @@ class LegendOfArcadia {
     
             if (heroes) {
                 const existingHeroIds = Object.keys(heroes).map(id => parseInt(id));
+                existingHeroIds.sort((a, b) => b - a);
                 const allHeroIds = Array.from({ length: 16 }, (_, i) => i + 1); 
                 const unlockHeroIds = allHeroIds.filter(id => !existingHeroIds.includes(id));
     
@@ -235,7 +236,6 @@ class LegendOfArcadia {
                 this.log('Không tìm thấy dữ liệu Hero.'.red);
             }
     
-            // Log thông tin về Hero hiện có
             if (heroes) {
                 this.log('Thông tin Hero hiện có:'.green);
                 for (const [heroId, heroData] of Object.entries(heroes)) {
@@ -344,8 +344,15 @@ class LegendOfArcadia {
             if (userData) {
                 console.log(`========== Tài khoản ${accountNumber} | ${userData.Name.green} ==========`);
                 this.log(`Point: ${userData.Point.toString().white}`.green);
+                this.log(`Minikey: ${userData.MiniKey.toString().white}`.green);
                 this.log(`Coin: ${userData.Coin.toString().white}`.green);
                 this.log(`Energy: ${userData.Energy.toString().white}`.green);
+    
+                await this.syncAndReceiveMissions(authorization);
+
+                if (userData.MiniKey > 0) {
+                    await this.openBox(authorization, userData.MiniKey);
+                }
     
                 const playerStates = response.data.data?.PlayerStates;
                 for (const player of playerStates) {
@@ -384,6 +391,67 @@ class LegendOfArcadia {
             console.error(error.message.red);
         }
     }    
+
+    async syncAndReceiveMissions(authorization) {
+        const syncUrl = "https://mini-03.legendofarcadia.io/Mini/SyncMission";
+        const recvUrl = "https://mini-03.legendofarcadia.io/Mini/RecvMission";
+        const headers = this.headers(authorization);
+    
+        try {
+            const syncResponse = await axios.get(syncUrl, { headers });
+            const missions = syncResponse.data.data?.UserData?.Mission?.Missions;
+    
+            if (missions) {
+                const pendingMissions = Object.entries(missions)
+                    .filter(([_, mission]) => mission.FinTime > 0 && mission.RecvTime === 0)
+                    .map(([id, _]) => parseInt(id));
+    
+                if (pendingMissions.length > 0) {
+                    this.log(`Tìm thấy ${pendingMissions.length} nhiệm vụ cần nhận thưởng.`.green);
+    
+                    for (const missionId of pendingMissions) {
+                        const payload = { MissionId: missionId };
+                        try {
+                            const recvResponse = await axios.post(recvUrl, payload, { headers });
+                            if (recvResponse.data.code === 0) {
+                                this.log(`Đã nhận thưởng nhiệm vụ ID: ${missionId}`.green);
+                            } else {
+                                this.log(`Lỗi khi nhận thưởng nhiệm vụ ID: ${missionId}. Mã lỗi: ${recvResponse.data.code}`.red);
+                            }
+                        } catch (recvError) {
+                            this.log(`Lỗi khi gọi API nhận thưởng cho nhiệm vụ ID: ${missionId}`.red);
+                            console.error(recvError.message.red);
+                        }
+                    }
+                } else {
+                    this.log("Không có nhiệm vụ nào cần nhận thưởng.".yellow);
+                }
+            } else {
+                this.log("Không tìm thấy dữ liệu nhiệm vụ.".red);
+            }
+        } catch (error) {
+            this.log("Lỗi khi gọi API đồng bộ nhiệm vụ.".red);
+            console.error(error.message.red);
+        }
+    }
+
+    async openBox(authorization, minikeyCount) {
+        const url = "https://mini-02.legendofarcadia.io/Mini/OpenMinicryBox";
+        const headers = this.headers(authorization);
+        const payload = { Num: minikeyCount };
+    
+        try {
+            const response = await axios.post(url, payload, { headers });
+            if (response.data.code === 0) {
+                this.log(`Đã mở thành công ${minikeyCount} hộp Gacha Points.`.green);
+            } else {
+                this.log(`Lỗi khi mở hộp Gacha Points: ${response.data.message}`.red);
+            }
+        } catch (error) {
+            this.log(`Lỗi khi gọi API mở hộp Gacha Points.`.red);
+            console.error(error.message.red);
+        }
+    }
 
     async waitWithCountdown(seconds) {
         for (let i = seconds; i >= 0; i--) {
